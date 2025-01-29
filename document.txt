@@ -1,0 +1,92 @@
+2.3. DeepSeek-R1: Reinforcement Learning with Cold Start
+
+Inspired by the promising results of DeepSeek-R1-Zero, two natural questions arise: 1) Can
+reasoning performance be further improved or convergence accelerated by incorporating a small
+amount of high-quality data as a cold start? 2) How can we train a user-friendly model that
+not only produces clear and coherent Chains of Thought (CoT) but also demonstrates strong
+general capabilities? To address these questions, we design a pipeline to train DeepSeek-R1. The
+pipeline consists of four stages, outlined as follows.
+
+2.3.1. Cold Start
+
+Unlike DeepSeek-R1-Zero, to prevent the early unstable cold start phase of RL training from
+the base model, for DeepSeek-R1 we construct and collect a small amount of long CoT data
+to fine-tune the model as the initial RL actor. To collect such data, we have explored several
+approaches: using few-shot prompting with a long CoT as an example, directly prompting
+models to generate detailed answers with reflection and verification, gathering DeepSeek-R1-
+Zero outputs in a readable format, and refining the results through post-processing by human
+annotators.
+In this work, we collect thousands of cold-start data to fine-tune the DeepSeek-V3-Base as
+the starting point for RL. Compared to DeepSeek-R1-Zero, the advantages of cold start data
+
+include:
+• 
+Readability: A key limitation of DeepSeek-R1-Zero is that its content is often not suitable
+for reading. Responses may mix multiple languages or lack markdown formatting to
+highlight answers for users. In contrast, when creating cold-start data for DeepSeek-R1,
+we design a readable pattern that includes a summary at the end of each response and
+filters out responses that are not reader-friendly. Here, we define the output format as
+|special_token|<reasoning_process>|special_token|<summary>, where the reasoning
+process is the CoT for the query, and the summary is used to summarize the reasoning
+results.
+
+• Potential: By carefully designing the pattern for cold-start data with human priors, we
+observe better performance against DeepSeek-R1-Zero. We believe the iterative training is
+a better way for reasoning models.
+
+2.3.2. Reasoning-oriented Reinforcement Learning
+
+After fine-tuning DeepSeek-V3-Base on the cold start data, we apply the same large-scale
+reinforcement learning training process as employed in DeepSeek-R1-Zero. This phase focuses
+on enhancing the model’s reasoning capabilities, particularly in reasoning-intensive tasks such
+as coding, mathematics, science, and logic reasoning, which involve well-defined problems with
+clear solutions. During the training process, we observe that CoT often exhibits language mixing,
+particularly when RL prompts involve multiple languages. To mitigate the issue of language
+mixing, we introduce a language consistency reward during RL training, which is calculated
+as the proportion of target language words in the CoT. Although ablation experiments show
+that such alignment results in a slight degradation in the model’s performance, this reward
+aligns with human preferences, making it more readable. Finally, we combine the accuracy of
+reasoning tasks and the reward for language consistency by directly summing them to form the
+final reward. We then apply RL training on the fine-tuned model until it achieves convergence
+on reasoning tasks.
+
+2.3.3. Rejection Sampling and Supervised Fine-Tuning
+
+When reasoning-oriented RL converges, we utilize the resulting checkpoint to collect SFT
+(Supervised Fine-Tuning) data for the subsequent round. Unlike the initial cold-start data, which
+primarily focuses on reasoning, this stage incorporates data from other domains to enhance the
+model’s capabilities in writing, role-playing, and other general-purpose tasks. Specifically, we
+generate the data and fine-tune the model as described below.
+Reasoning data We curate reasoning prompts and generate reasoning trajectories by performing rejection sampling from the checkpoint from the above RL training. In the previous stage,
+we only included data that could be evaluated using rule-based rewards. However, in this stage,
+we expand the dataset by incorporating additional data, some of which use a generative reward
+model by feeding the ground-truth and model predictions into DeepSeek-V3 for judgment.
+Additionally, because the model output is sometimes chaotic and difficult to read, we have
+filtered out chain-of-thought with mixed languages, long parapraphs, and code blocks. For
+each prompt, we sample multiple responses and retain only the correct ones. In total, we collect
+about 600k reasoning related training samples.
+
+Non-Reasoning data For non-reasoning data, such as writing, factual QA, self-cognition,
+and translation, we adopt the DeepSeek-V3 pipeline and reuse portions of the SFT dataset of
+DeepSeek-V3. For certain non-reasoning tasks, we call DeepSeek-V3 to generate a potential
+chain-of-thought before answering the question by prompting. However, for simpler queries,
+such as “hello” we do not provide a CoT in response. In the end, we collected a total of
+approximately 200k training samples that are unrelated to reasoning.
+We fine-tune DeepSeek-V3-Base for two epochs using the above curated dataset of about
+800k samples.
+
+2.3.4. Reinforcement Learning for all Scenarios
+
+To further align the model with human preferences, we implement a secondary reinforcement
+learning stage aimed at improving the model’s helpfulness and harmlessness while simultaneously refining its reasoning capabilities. Specifically, we train the model using a combination
+of reward signals and diverse prompt distributions. For reasoning data, we adhere to the
+methodology outlined in DeepSeek-R1-Zero, which utilizes rule-based rewards to guide the
+learning process in math, code, and logical reasoning domains. For general data, we resort to
+reward models to capture human preferences in complex and nuanced scenarios. We build
+upon the DeepSeek-V3 pipeline and adopt a similar distribution of preference pairs and training prompts. For helpfulness, we focus exclusively on the final summary, ensuring that the
+assessment emphasizes the utility and relevance of the response to the user while minimizing
+interference with the underlying reasoning process. For harmlessness, we evaluate the entire
+response of the model, including both the reasoning process and the summary, to identify and
+mitigate any potential risks, biases, or harmful content that may arise during the generation
+process. Ultimately, the integration of reward signals and diverse data distributions enables us
+to train a model that excels in reasoning while prioritizing helpfulness and harmlessness.
